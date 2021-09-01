@@ -1,4 +1,5 @@
 require('dotenv').config();
+const generateAccessToken = require('../auth/auth');
 
 const jwt = require('jsonwebtoken');
 
@@ -102,6 +103,14 @@ const CategoryType = new GraphQLObjectType({
   }),
 });
 
+const TokenInfoType = new GraphQLObjectType({
+  name: 'TokenInfo',
+  fields: () => ({
+    accessToken: { type: GraphQLString },
+    refreshToken: { type: GraphQLString },
+  }),
+});
+
 const RootQuery = new GraphQLObjectType({
   name: 'RootQueryType',
   fields: {
@@ -184,29 +193,72 @@ const Mutation = new GraphQLObjectType({
       type: UserType,
       args: {
         email: { type: new GraphQLNonNull(GraphQLString) },
+        name: { type: new GraphQLNonNull(GraphQLString) },
+        password: { type: new GraphQLNonNull(GraphQLString) },
+        confirmPassword: { type: new GraphQLNonNull(GraphQLString) },
+      },
+      async resolve(parent, args) {
+        if (!args.email) throw new Error('Email is required');
+        if (!args.name) throw new Error('Name is required');
+        if (!args.password) throw new Error('Password is required');
+
+        if (args.password !== args.confirmPassword)
+          throw new Error('Passwords do not match');
+
+        try {
+          console.log(args.password);
+          const hashedPassword = await bcrypt.hash(args.password, 10);
+          console.log(hashedPassword);
+
+          const user = {
+            email: args.email,
+            name: args.name,
+            password: hashedPassword,
+          };
+          return User(user).save();
+        } catch (e) {
+          throw new Error('Server error');
+        }
+      },
+    },
+    loginUser: {
+      type: TokenInfoType,
+      args: {
+        email: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
       },
       async resolve(parent, args) {
         try {
-          const hashedPassword = await bcrypt.hash(args.password, 10);
-          const user = { email: args.email, password: hashedPassword };
-          console.log(hashedPassword);
-          return User(user).save();
-        } catch (e) {
-          console.log(e);
+          const user = await User.findOne({ email: args.email });
+
+          try {
+            const match = await bcrypt.compare(args.password, user.password);
+
+            if (match) {
+              const authenticatedUser = { id: user.id, email: user.email };
+              const accessToken = generateAccessToken(authenticatedUser);
+              const refreshToken = jwt.sign(
+                authenticatedUser,
+                process.env.REFRESH_TOKEN_SECRET
+              );
+
+              console.log(refreshToken);
+
+              return {
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+              };
+            } else {
+              throw new Error('Email or password incorrect');
+            }
+          } catch {
+            throw new Error('Email or password incorrect');
+          }
+        } catch {
+          throw new Error('Email or password incorrect');
         }
       },
     },
-    // changeDeck: {
-    //   args: {
-    //     deckId: { type: new GraphQLNonNull(GraphQLString) },
-    //   },
-    //   async resolve(parent, args, context) {
-    //     try {
-
-    //     }
-    //   }
-    // },
   },
 });
 

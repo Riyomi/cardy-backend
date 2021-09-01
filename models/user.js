@@ -10,12 +10,30 @@ const userSchema = new Schema({
     type: String,
     required: true,
   },
-  name: String,
-  level: Number,
-  experience: Number,
-  followers: Array,
-  following: Array,
-  decks: Array,
+  name: {
+    type: String,
+    required: true,
+  },
+  level: {
+    type: Number,
+    default: 1,
+  },
+  experience: {
+    type: Number,
+    default: 0,
+  },
+  followers: {
+    type: Array,
+    default: [],
+  },
+  following: {
+    type: Array,
+    default: [],
+  },
+  decks: {
+    type: Array,
+    default: [],
+  },
 });
 
 module.exports = mongoose.model('User', userSchema);
