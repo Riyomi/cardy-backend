@@ -10,8 +10,6 @@ const Deck = require('../models/deck');
 const User = require('../models/user');
 const Category = require('../models/category');
 
-const _ = require('lodash');
-
 const {
   GraphQLObjectType,
   GraphQLString,
@@ -28,10 +26,35 @@ const UserType = new GraphQLObjectType({
     id: { type: GraphQLID },
     email: { type: GraphQLString },
     name: { type: GraphQLString },
+    img: { type: GraphQLString },
     level: { type: GraphQLInt },
     experience: { type: GraphQLInt },
-    followers: { type: new GraphQLList(UserType) },
-    following: { type: new GraphQLList(UserType) },
+    followers: {
+      type: new GraphQLList(UserType),
+      async resolve(parent, args) {
+        try {
+          const user = await User.findById(parent.id);
+          return await User.find({
+            _id: { $in: user.followers },
+          });
+        } catch {
+          throw new Error('database error');
+        }
+      },
+    },
+    following: {
+      type: new GraphQLList(UserType),
+      async resolve(parent, args) {
+        try {
+          const user = await User.findById(parent.id);
+          return await User.find({
+            _id: { $in: user.following },
+          });
+        } catch (e) {
+          throw new Error('database error');
+        }
+      },
+    },
     decks: {
       type: new GraphQLList(DeckType),
       resolve(parent, args) {
@@ -103,9 +126,10 @@ const CategoryType = new GraphQLObjectType({
   }),
 });
 
-const TokenInfoType = new GraphQLObjectType({
-  name: 'TokenInfo',
+const UserInfoType = new GraphQLObjectType({
+  name: 'UserInfo',
   fields: () => ({
+    user: { type: UserType },
     accessToken: { type: GraphQLString },
     refreshToken: { type: GraphQLString },
   }),
@@ -206,9 +230,7 @@ const Mutation = new GraphQLObjectType({
           throw new Error('Passwords do not match');
 
         try {
-          console.log(args.password);
           const hashedPassword = await bcrypt.hash(args.password, 10);
-          console.log(hashedPassword);
 
           const user = {
             email: args.email,
@@ -222,7 +244,7 @@ const Mutation = new GraphQLObjectType({
       },
     },
     loginUser: {
-      type: TokenInfoType,
+      type: UserInfoType,
       args: {
         email: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
@@ -242,9 +264,8 @@ const Mutation = new GraphQLObjectType({
                 process.env.REFRESH_TOKEN_SECRET
               );
 
-              console.log(refreshToken);
-
               return {
+                user: user,
                 accessToken: accessToken,
                 refreshToken: refreshToken,
               };
@@ -256,6 +277,29 @@ const Mutation = new GraphQLObjectType({
           }
         } catch {
           throw new Error('Email or password incorrect');
+        }
+      },
+    },
+    followUser: {
+      type: UserType,
+      args: {
+        followerId: { type: new GraphQLNonNull(GraphQLID) },
+        followingId: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args) {
+        try {
+          const follower = await User.findById(args.followerId);
+          const following = await User.findById(args.followingId);
+
+          await User.findByIdAndUpdate(args.followingId, {
+            $push: { followers: args.followerId },
+          });
+
+          return await User.findByIdAndUpdate(args.followerId, {
+            $push: { following: args.followingId },
+          });
+        } catch (e) {
+          throw new Error('Follower or following not found');
         }
       },
     },

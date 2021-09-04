@@ -22,6 +22,10 @@ const cardSchema = new Schema({
     type: String,
     required: true,
   },
+  mastered: {
+    type: Boolean,
+    default: false,
+  },
   img: String,
   audio: String,
 });

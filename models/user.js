@@ -14,6 +14,10 @@ const userSchema = new Schema({
     type: String,
     required: true,
   },
+  img: {
+    type: String,
+    default: 'https://i.imgur.com/Vumn7gm.png',
+  },
   level: {
     type: Number,
     default: 1,
