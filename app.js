@@ -7,6 +7,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const app = express();
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 mongoose.connect(
   `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGODB_PASSWORD}@mygameslist.elmu1.mongodb.net/cardy?retryWrites=true&w=majority`
@@ -24,13 +25,15 @@ app.use(
   })
 );
 
-app.use(
-  '/graphql',
-  graphqlHTTP({
+app.use(cookieParser());
+
+app.use('/graphql', (req, res) => {
+  return graphqlHTTP({
     schema,
     graphiql: true,
-  })
-);
+    context: { req, res, token: getToken(req) },
+  })(req, res);
+});
 
 app.use(express.json());
 
@@ -39,32 +42,13 @@ app.delete('/logout', (req, res) => {
   res.sendStatus(204);
 });
 
-app.post('/token', (req, res) => {
-  console.log(req.body.token);
-  const refreshToken = req.body.token;
-  if (refreshToken == null) return res.sendStatus(401);
-  if (!refreshTokens.includes(refreshToken)) return res.sendStatus(403);
-  jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET, (err, user) => {
-    if (err) return res.sendStatus(403);
-
-    const accessToken = generateAccessToken({ email: user.email });
-    res.json({ accessToken: accessToken });
-  });
-});
-
-// function authenticateToken(req, res, next) {
-//   const authHeader = req.headers['authorization'];
-//   const token = authHeader && authHeader.split(' ')[1];
-
-//   if (token == null) return res.sendStatus(401);
-
-//   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
-//     if (err) return res.sendStatus(403);
-//     req.user = user;
-//     next();
-//   });
-// }
-
 app.listen(4000, () => {
   console.log('Listening on port 4000...');
 });
+
+function getToken(req) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  return token;
+}

@@ -1,5 +1,5 @@
 require('dotenv').config();
-const generateAccessToken = require('../auth/auth');
+const { generateAccessToken, authenticateToken } = require('../auth/auth');
 
 const jwt = require('jsonwebtoken');
 
@@ -18,6 +18,7 @@ const {
   GraphQLInt,
   GraphQLList,
   GraphQLNonNull,
+  GraphQLBoolean,
 } = graphql;
 
 const UserType = new GraphQLObjectType({
@@ -57,10 +58,24 @@ const UserType = new GraphQLObjectType({
     },
     decks: {
       type: new GraphQLList(DeckType),
-      resolve(parent, args) {
-        return Deck.find({ userId: parent.id });
+      resolve(parent, args, context) {
+        const { token } = context;
+        const user = authenticateToken(token);
+
+        if (user) return Deck.find({ userId: parent.id });
+
+        return Deck.find({ userId: parent.id, isPublic: true });
       },
     },
+  }),
+});
+
+const SessionType = new GraphQLObjectType({
+  name: 'Session',
+  fields: () => ({
+    user: { type: UserType },
+    accessToken: { type: GraphQLString },
+    expires: { type: GraphQLString },
   }),
 });
 
@@ -111,7 +126,6 @@ const CardType = new GraphQLObjectType({
     deck: {
       type: DeckType,
       resolve(parent, args) {
-        3;
         return Deck.findById(parent.deckId);
       },
     },
@@ -123,15 +137,6 @@ const CategoryType = new GraphQLObjectType({
   fields: () => ({
     id: { type: GraphQLID },
     name: { type: GraphQLString },
-  }),
-});
-
-const UserInfoType = new GraphQLObjectType({
-  name: 'UserInfo',
-  fields: () => ({
-    user: { type: UserType },
-    accessToken: { type: GraphQLString },
-    refreshToken: { type: GraphQLString },
   }),
 });
 
@@ -148,8 +153,15 @@ const RootQuery = new GraphQLObjectType({
     deck: {
       type: DeckType,
       args: { id: { type: GraphQLID } },
-      resolve(parent, args) {
-        return Deck.findById(args.id);
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+
+        const deck = await Deck.findById(args.id);
+
+        if (!deck.isPublic && deck.userId !== user?.id)
+          throw new Error('Forbidden');
+        return deck;
       },
     },
     card: {
@@ -171,40 +183,26 @@ const RootQuery = new GraphQLObjectType({
         return Category.find({});
       },
     },
-    // users: {
-    //   type: GraphQLList(UserType),
-    //   resolve(parent, args, context) {
-    //     const authHeader = context.headers['authorization'];
-    //     const token = authHeader && authHeader.split(' ')[1];
-
-    //     console.log(token);
-
-    //     if (token == null) return null;
-
-    //     let users = null;
-
-    //     jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
-    //       if (err) {
-    //         users = err;
-    //         return;
-    //       }
-
-    //       users = User.find({});
-    //     });
-
-    //     return users;
-    //   },
-    // },
     decks: {
       type: GraphQLList(DeckType),
       resolve(parent, args) {
         return Deck.find({ isPublic: true });
       },
     },
-    cards: {
-      type: GraphQLList(CardType),
-      resolve(parent, args) {
-        return Card.find({});
+    accessToken: {
+      type: GraphQLString,
+      resolve(parent, args, context) {
+        const refreshToken = context.req.cookies.refreshToken;
+        const user = authenticateToken(
+          refreshToken,
+          process.env.REFRESH_TOKEN_SECRET
+        );
+
+        if (!user) throw new Error('Forbidden');
+
+        const accessToken = generateAccessToken(user);
+
+        return accessToken;
       },
     },
   },
@@ -244,12 +242,12 @@ const Mutation = new GraphQLObjectType({
       },
     },
     loginUser: {
-      type: UserInfoType,
+      type: SessionType,
       args: {
         email: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
       },
-      async resolve(parent, args) {
+      async resolve(parent, args, context) {
         try {
           const user = await User.findOne({ email: args.email });
 
@@ -263,12 +261,16 @@ const Mutation = new GraphQLObjectType({
                 authenticatedUser,
                 process.env.REFRESH_TOKEN_SECRET
               );
+              const expires = new Date(Date.now() + 900000).toString();
+              // const expires = new Date(Date.now() + 15000).toString(); // for testing only
 
-              return {
-                user: user,
-                accessToken: accessToken,
-                refreshToken: refreshToken,
-              };
+              context.res.cookie('refreshToken', refreshToken, {
+                httpOnly: true,
+                sameSite: 'none',
+                secure: true,
+              });
+
+              return { user, accessToken, expires };
             } else {
               throw new Error('Email or password incorrect');
             }
@@ -283,24 +285,90 @@ const Mutation = new GraphQLObjectType({
     followUser: {
       type: UserType,
       args: {
-        followerId: { type: new GraphQLNonNull(GraphQLID) },
-        followingId: { type: new GraphQLNonNull(GraphQLID) },
+        userToBeFollowed: { type: new GraphQLNonNull(GraphQLID) },
       },
-      async resolve(parent, args) {
-        try {
-          const follower = await User.findById(args.followerId);
-          const following = await User.findById(args.followingId);
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
 
-          await User.findByIdAndUpdate(args.followingId, {
-            $push: { followers: args.followerId },
+        if (!user) throw new Error('Forbidden');
+
+        try {
+          await User.findByIdAndUpdate(args.userToBeFollowed, {
+            $push: { followers: user.id },
           });
 
-          return await User.findByIdAndUpdate(args.followerId, {
-            $push: { following: args.followingId },
+          return await User.findByIdAndUpdate(user.id, {
+            $push: { following: args.userToBeFollowed },
           });
         } catch (e) {
           throw new Error('Follower or following not found');
         }
+      },
+    },
+    unfollowUser: {
+      type: UserType,
+      args: {
+        userToBeUnfollowed: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+
+        if (!user) throw new Error('Forbidden');
+
+        try {
+          await User.findByIdAndUpdate(user.id, {
+            $pull: { following: args.userToBeUnfollowed },
+          });
+
+          return await User.findByIdAndUpdate(args.userToBeUnfollowed, {
+            $pull: { followers: user.id },
+          });
+        } catch (e) {
+          throw new Error('Follower or following not found');
+        }
+      },
+    },
+    createDeck: {
+      type: DeckType,
+      args: {
+        title: { type: new GraphQLNonNull(GraphQLString) },
+        img: { type: GraphQLString },
+        isPublic: { type: new GraphQLNonNull(GraphQLBoolean) },
+        categoryId: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+
+        if (!user) throw new Error('Forbidden');
+
+        try {
+          const { title, img, isPublic, categoryId } = args;
+
+          const deck = {
+            title,
+            img: img ? img : 'https://via.placeholder.com/100x70',
+            isPublic,
+            categoryId,
+            userId: user.id,
+            createdBy: user.id,
+          };
+
+          return await Deck(deck).save();
+        } catch (e) {
+          throw new Error('Failed to save deck');
+        }
+      },
+    },
+    logoutUser: {
+      type: GraphQLString,
+      async resolve(parent, args, context) {
+        context.res.clearCookie('refreshToken');
+        context.res.clearCookie('accessToken');
+
+        return 'Logged out';
       },
     },
   },

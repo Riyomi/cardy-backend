@@ -12,6 +12,7 @@ const deckSchema = new Schema({
   },
   img: {
     type: String,
+    default: 'https://via.placeholder.com/100x70',
   },
   categoryId: {
     type: String,
