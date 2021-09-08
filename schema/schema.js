@@ -1,9 +1,7 @@
 require('dotenv').config();
 const { generateAccessToken, authenticateToken } = require('../auth/auth');
-
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
-
-const graphql = require('graphql');
 const bcrypt = require('bcrypt');
 const Card = require('../models/card');
 const Deck = require('../models/deck');
@@ -18,7 +16,7 @@ const {
   GraphQLInt,
   GraphQLList,
   GraphQLNonNull,
-} = graphql;
+} = require('graphql');
 
 const UserType = new GraphQLObjectType({
   name: 'User',
@@ -123,6 +121,7 @@ const CardType = new GraphQLObjectType({
   name: 'Card',
   fields: () => ({
     id: { type: GraphQLID },
+    publicId: { type: GraphQLID },
     front: { type: GraphQLString },
     back: { type: GraphQLString },
     step: { type: GraphQLInt },
@@ -393,7 +392,7 @@ const Mutation = new GraphQLObjectType({
         const deck = await Deck.findById(args.id);
 
         if (deck.publicId === deck.id) {
-          Deck.updateMany(
+          await Deck.updateMany(
             { publicId: deck.id },
             {
               $set: { publicId: null },
@@ -401,7 +400,7 @@ const Mutation = new GraphQLObjectType({
           );
         }
 
-        return Deck.deleteOne({ _id: args.id, userId: user.id });
+        return await Deck.deleteOne({ _id: args.id, userId: user.id });
       },
     },
     copyDeck: {
@@ -433,6 +432,7 @@ const Mutation = new GraphQLObjectType({
 
           for (const card of cards) {
             const cardCopy = {
+              publicId: card.id,
               front: card.front,
               back: card.back,
               img: card.img,
@@ -446,6 +446,78 @@ const Mutation = new GraphQLObjectType({
         } catch (err) {
           throw new Error(err.message);
         }
+      },
+    },
+    createCard: {
+      type: CardType,
+      args: {
+        deckId: { type: new GraphQLNonNull(GraphQLID) },
+        front: { type: new GraphQLNonNull(GraphQLString) },
+        back: { type: new GraphQLNonNull(GraphQLString) },
+        img: { type: GraphQLString },
+        audio: { type: GraphQLString },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        const deck = await Deck.findById(args.deckId);
+        if (!deck) throw new Error('Deck not found');
+
+        if (deck.publicId && deck.publicId !== deck.id)
+          throw new Error('Not authorized to modify deck');
+
+        const card = {
+          publicId: null,
+          front: args.front,
+          back: args.back,
+          img: args?.img,
+          audio: args?.audio,
+          deckId: args.deckId,
+        };
+
+        const originalCard = await Card(card).save();
+
+        if (deck.publicId === deck.id) {
+          const decksToUpdate = await Deck.find({
+            publicId: deck.publicId,
+            _id: { $ne: deck.id },
+          });
+
+          card.publicId = originalCard.id;
+
+          for (const deck of decksToUpdate) {
+            card.deckId = deck.id;
+
+            await Card(card).save();
+          }
+        }
+
+        return null;
+      },
+    },
+    deleteCard: {
+      type: GraphQLString,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        const card = await Card.findById(args.id);
+        if (!card) throw new Error('Card not found');
+
+        const deck = await Deck.findById(card.deckId);
+        if (deck.publicId && deck.publicId !== deck.id)
+          throw new Error('Not authorized to modify deck');
+
+        await Card.deleteMany({ publicId: card.id });
+        await Card.deleteOne({ _id: args.id });
+
+        return 'successfully deleted';
       },
     },
   },

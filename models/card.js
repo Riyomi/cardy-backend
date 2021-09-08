@@ -22,6 +22,10 @@ const cardSchema = new Schema({
     type: String,
     required: true,
   },
+  publicId: {
+    type: String,
+    default: null,
+  },
   mastered: {
     type: Boolean,
     default: false,
