@@ -18,7 +18,6 @@ const {
   GraphQLInt,
   GraphQLList,
   GraphQLNonNull,
-  GraphQLBoolean,
 } = graphql;
 
 const UserType = new GraphQLObjectType({
@@ -64,7 +63,7 @@ const UserType = new GraphQLObjectType({
 
         if (user) return Deck.find({ userId: parent.id });
 
-        return Deck.find({ userId: parent.id, isPublic: true });
+        return Deck.find({ userId: parent.id, publicId: { $ne: null } });
       },
     },
   }),
@@ -85,7 +84,14 @@ const DeckType = new GraphQLObjectType({
     id: { type: GraphQLID },
     title: { type: GraphQLString },
     img: { type: GraphQLString },
-    learners: { type: GraphQLList(GraphQLID) },
+    learners: {
+      type: GraphQLInt,
+      async resolve(parent, args) {
+        const learners = await Deck.find({ publicId: parent.id });
+        return learners.length ? learners.length : 1;
+      },
+    },
+    publicId: { type: GraphQLString },
     category: {
       type: CategoryType,
       resolve(parent, args) {
@@ -159,7 +165,7 @@ const RootQuery = new GraphQLObjectType({
 
         const deck = await Deck.findById(args.id);
 
-        if (!deck.isPublic && deck.userId !== user?.id)
+        if (!deck.publicId && deck.userId !== user?.id)
           throw new Error('Forbidden');
         return deck;
       },
@@ -185,8 +191,9 @@ const RootQuery = new GraphQLObjectType({
     },
     decks: {
       type: GraphQLList(DeckType),
-      resolve(parent, args) {
-        return Deck.find({ isPublic: true });
+      async resolve(parent, args) {
+        const decks = await Deck.find({ publicId: { $ne: null } });
+        return decks.filter((deck) => deck.id === deck.publicId);
       },
     },
     accessToken: {
@@ -333,10 +340,9 @@ const Mutation = new GraphQLObjectType({
     createDeck: {
       type: DeckType,
       args: {
-        title: { type: new GraphQLNonNull(GraphQLString) },
+        title: { type: GraphQLString },
         img: { type: GraphQLString },
-        isPublic: { type: new GraphQLNonNull(GraphQLBoolean) },
-        categoryId: { type: new GraphQLNonNull(GraphQLID) },
+        categoryId: { type: GraphQLID },
       },
       async resolve(parent, args, context) {
         const token = context.token;
@@ -344,13 +350,15 @@ const Mutation = new GraphQLObjectType({
 
         if (!user) throw new Error('Forbidden');
 
+        if (!args.title) throw new Error('Title is required');
+        if (!args.categoryId) throw new Error('You must select a category');
+
         try {
-          const { title, img, isPublic, categoryId } = args;
+          const { title, img, categoryId } = args;
 
           const deck = {
             title,
             img: img ? img : 'https://via.placeholder.com/100x70',
-            isPublic,
             categoryId,
             userId: user.id,
             createdBy: user.id,
@@ -369,6 +377,75 @@ const Mutation = new GraphQLObjectType({
         context.res.clearCookie('accessToken');
 
         return 'Logged out';
+      },
+    },
+    quitDeck: {
+      type: DeckType,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+
+        if (!user) throw new Error('Forbidden');
+
+        const deck = await Deck.findById(args.id);
+
+        if (deck.publicId === deck.id) {
+          Deck.updateMany(
+            { publicId: deck.id },
+            {
+              $set: { publicId: null },
+            }
+          );
+        }
+
+        return Deck.deleteOne({ _id: args.id, userId: user.id });
+      },
+    },
+    copyDeck: {
+      type: DeckType,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+
+        if (!user) throw new Error('Forbidden');
+
+        const deck = await Deck.findById(args.id);
+
+        try {
+          const deckCopy = {
+            title: deck.title,
+            img: deck.img,
+            userId: user.id,
+            createdBy: deck.createdBy,
+            categoryId: deck.categoryId,
+            publicId: deck.id,
+          };
+
+          const deckCopyDB = await Deck(deckCopy).save();
+
+          const cards = await Card.find({ deckId: deck.id });
+
+          for (const card of cards) {
+            const cardCopy = {
+              front: card.front,
+              back: card.back,
+              img: card.img,
+              audio: card.audio,
+              deckId: deckCopyDB.id,
+            };
+            Card(cardCopy).save();
+          }
+
+          return deckCopy;
+        } catch (err) {
+          throw new Error(err.message);
+        }
       },
     },
   },

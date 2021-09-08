@@ -6,34 +6,25 @@ const deckSchema = new Schema({
     type: String,
     required: true,
   },
-  createdBy: {
-    type: String,
-    required: true,
-  },
   img: {
     type: String,
     default: 'https://via.placeholder.com/100x70',
-  },
-  categoryId: {
-    type: String,
-    required: true,
   },
   userId: {
     type: String,
     required: true,
   },
-  isPublic: {
-    type: Boolean,
+  createdBy: {
+    type: String,
     required: true,
-    default: false,
   },
-  learners: {
-    type: Array,
-    default: [],
+  categoryId: {
+    type: String,
+    required: true,
   },
-  cards: {
-    type: Array,
-    default: [],
+  publicId: {
+    type: String,
+    default: null,
   },
 });
 

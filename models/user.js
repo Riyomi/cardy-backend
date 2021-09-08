@@ -34,10 +34,6 @@ const userSchema = new Schema({
     type: Array,
     default: [],
   },
-  decks: {
-    type: Array,
-    default: [],
-  },
 });
 
 module.exports = mongoose.model('User', userSchema);

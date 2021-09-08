@@ -12,11 +12,11 @@ const cardSchema = new Schema({
   },
   step: {
     type: Number,
-    required: true,
+    default: 2,
   },
   streak: {
     type: Number,
-    required: true,
+    default: 0,
   },
   deckId: {
     type: String,
@@ -26,8 +26,14 @@ const cardSchema = new Schema({
     type: Boolean,
     default: false,
   },
-  img: String,
-  audio: String,
+  img: {
+    type: String,
+    default: null,
+  },
+  audio: {
+    type: String,
+    default: null,
+  },
 });
 
 module.exports = mongoose.model('Card', cardSchema);
