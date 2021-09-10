@@ -1,6 +1,5 @@
 require('dotenv').config();
 const { generateAccessToken, authenticateToken } = require('../auth/auth');
-const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const Card = require('../models/card');
@@ -85,8 +84,11 @@ const DeckType = new GraphQLObjectType({
     learners: {
       type: GraphQLInt,
       async resolve(parent, args) {
-        const learners = await Deck.find({ publicId: parent.id });
-        return learners.length ? learners.length : 1;
+        if (parent.publicId) {
+          const learners = await Deck.find({ publicId: parent.publicId });
+          return learners.length;
+        }
+        return 1;
       },
     },
     publicId: { type: GraphQLString },
@@ -193,22 +195,6 @@ const RootQuery = new GraphQLObjectType({
       async resolve(parent, args) {
         const decks = await Deck.find({ publicId: { $ne: null } });
         return decks.filter((deck) => deck.id === deck.publicId);
-      },
-    },
-    accessToken: {
-      type: GraphQLString,
-      resolve(parent, args, context) {
-        const refreshToken = context.req.cookies.refreshToken;
-        const user = authenticateToken(
-          refreshToken,
-          process.env.REFRESH_TOKEN_SECRET
-        );
-
-        if (!user) throw new Error('Forbidden');
-
-        const accessToken = generateAccessToken(user);
-
-        return accessToken;
       },
     },
   },
@@ -518,6 +504,147 @@ const Mutation = new GraphQLObjectType({
         await Card.deleteOne({ _id: args.id });
 
         return 'successfully deleted';
+      },
+    },
+    editDeck: {
+      type: DeckType,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+        title: { type: GraphQLString },
+        categoryId: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        if (!args.title) throw new Error('The deck must have a title');
+
+        const deck = await Deck.findById(args.id);
+        if (!deck) throw new Error('Deck not found');
+
+        const category = await Category.findById(args.categoryId);
+        if (!category) throw new Error('Category not found');
+
+        if (
+          deck.publicId &&
+          deck.id === deck.publicId &&
+          deck.userId === user.id
+        ) {
+          await Deck.updateMany(
+            { publicId: deck.publicId },
+            {
+              $set: {
+                title: args.title,
+                categoryId: args.categoryId,
+              },
+            }
+          );
+        } else if (!deck.publicId && deck.userId === user.id) {
+          await Deck.updateOne(
+            { _id: args.id },
+            {
+              $set: {
+                title: args.title,
+                categoryId: args.categoryId,
+              },
+            }
+          );
+        } else {
+          throw new Error('Not authorized to modify deck');
+        }
+      },
+    },
+    changeVisibility: {
+      type: GraphQLString,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        const deck = await Deck.findById(args.id);
+
+        if (
+          deck.publicId &&
+          deck.id === deck.publicId &&
+          deck.userId === user.id
+        ) {
+          await Card.updateMany(
+            { deckId: deck.publicId },
+            {
+              $set: {
+                publicId: null,
+              },
+            }
+          );
+
+          const decksToUpdate = await Deck.find({ publicId: deck.publicId });
+
+          for (const deck of decksToUpdate) {
+            await Card.updateMany(
+              { deckId: deck.id },
+              {
+                $set: {
+                  publicId: null,
+                },
+              }
+            );
+          }
+
+          await Deck.updateMany(
+            { publicId: deck.publicId },
+            {
+              $set: {
+                publicId: null,
+              },
+            }
+          );
+        } else if (!deck.publicId && deck.userId === user.id) {
+          await Deck.updateOne(
+            { _id: args.id },
+            {
+              $set: {
+                publicId: args.id,
+              },
+            }
+          );
+
+          const cardsToUpdate = await Card.find({ deckId: deck.id });
+
+          for (const card of cardsToUpdate) {
+            await Card.updateOne(
+              { _id: card.id },
+              { $set: { publicId: card.id } }
+            );
+          }
+        } else {
+          throw new Error('Not authorized to modify deck');
+        }
+      },
+    },
+    accessToken: {
+      type: SessionType,
+      resolve(parent, args, context) {
+        const refreshToken = context.req.cookies.refreshToken;
+        const user = authenticateToken(
+          refreshToken,
+          process.env.REFRESH_TOKEN_SECRET
+        );
+
+        if (!user) throw new Error('Forbidden');
+
+        const accessToken = generateAccessToken({
+          id: user.id,
+          email: user.email,
+        });
+
+        // const expires = new Date(Date.now() + 15000).toString(); // for testing only
+        const expires = new Date(Date.now() + 900000).toString();
+
+        return { accessToken, expires };
       },
     },
   },
