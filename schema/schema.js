@@ -24,7 +24,6 @@ const UserType = new GraphQLObjectType({
     email: { type: GraphQLString },
     name: { type: GraphQLString },
     img: { type: GraphQLString },
-    level: { type: GraphQLInt },
     experience: { type: GraphQLInt },
     followers: {
       type: new GraphQLList(UserType),
@@ -218,6 +217,10 @@ const Mutation = new GraphQLObjectType({
 
         if (args.password !== args.confirmPassword)
           throw new Error('Passwords do not match');
+
+        if (args.name.length > 20) {
+          throw new Error('The name is too long. Max 20 characters allowed');
+        }
 
         try {
           const hashedPassword = await bcrypt.hash(args.password, 10);
@@ -448,6 +451,9 @@ const Mutation = new GraphQLObjectType({
         const user = authenticateToken(token);
         if (!user) throw new Error('Forbidden');
 
+        if (args.front.length > 255 || args.back.length > 255)
+          throw new Error('Fields are too long, max 255 characters allowed.');
+
         const deck = await Deck.findById(args.deckId);
         if (!deck) throw new Error('Deck not found');
 
@@ -472,6 +478,11 @@ const Mutation = new GraphQLObjectType({
           });
 
           card.publicId = originalCard.id;
+
+          await Card.updateOne(
+            { _id: originalCard.id },
+            { $set: { publicId: originalCard.id } }
+          );
 
           for (const deck of decksToUpdate) {
             card.deckId = deck.id;
@@ -501,7 +512,6 @@ const Mutation = new GraphQLObjectType({
           throw new Error('Not authorized to modify deck');
 
         await Card.deleteMany({ publicId: card.id });
-        await Card.deleteOne({ _id: args.id });
 
         return 'successfully deleted';
       },
@@ -645,6 +655,34 @@ const Mutation = new GraphQLObjectType({
         const expires = new Date(Date.now() + 900000).toString();
 
         return { accessToken, expires };
+      },
+    },
+    editCard: {
+      type: CardType,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+        front: { type: new GraphQLNonNull(GraphQLString) },
+        back: { type: new GraphQLNonNull(GraphQLString) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        if (args.front.length > 255 || args.back.length > 255)
+          throw new Error('Fields are too long, max 255 characters allowed.');
+
+        const card = await Card.findById(args.id);
+        if (!card) throw new Error('Card not found');
+
+        const deck = await Deck.findById(card.deckId);
+        if (deck.publicId && deck.publicId !== deck.id)
+          throw new Error('Not authorized to modify deck');
+
+        await Card.updateMany(
+          { publicId: card.id },
+          { $set: { front: args.front, back: args.back } }
+        );
       },
     },
   },
