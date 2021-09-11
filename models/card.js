@@ -38,6 +38,9 @@ const cardSchema = new Schema({
     type: String,
     default: null,
   },
+  nextReview: {
+    type: Date,
+  },
 });
 
 module.exports = mongoose.model('Card', cardSchema);

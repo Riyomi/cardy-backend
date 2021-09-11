@@ -115,6 +115,16 @@ const DeckType = new GraphQLObjectType({
         return Card.find({ deckId: parent.id });
       },
     },
+    // unseenCards: {
+    //   type: GraphQLInt,
+    //   async resolve(parent, args) {
+    //     const cards = await Card.find({
+    //       deckId: parent.id,
+    //       reviewNext: { $ne: null },
+    //     });
+    //     return cards.length;
+    //   },
+    // },
   }),
 });
 
@@ -129,6 +139,7 @@ const CardType = new GraphQLObjectType({
     streak: { type: GraphQLInt },
     img: { type: GraphQLString },
     audio: { type: GraphQLString },
+    nextReview: { type: GraphQLString },
     deck: {
       type: DeckType,
       resolve(parent, args) {
@@ -431,7 +442,7 @@ const Mutation = new GraphQLObjectType({
             Card(cardCopy).save();
           }
 
-          return deckCopy;
+          return deckCopyDB;
         } catch (err) {
           throw new Error(err.message);
         }
