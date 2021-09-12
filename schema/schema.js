@@ -28,27 +28,19 @@ const UserType = new GraphQLObjectType({
     followers: {
       type: new GraphQLList(UserType),
       async resolve(parent, args) {
-        try {
-          const user = await User.findById(parent.id);
-          return await User.find({
-            _id: { $in: user.followers },
-          });
-        } catch {
-          throw new Error('database error');
-        }
+        const user = await User.findById(parent.id);
+        return await User.find({
+          _id: { $in: user.followers },
+        });
       },
     },
     following: {
       type: new GraphQLList(UserType),
       async resolve(parent, args) {
-        try {
-          const user = await User.findById(parent.id);
-          return await User.find({
-            _id: { $in: user.following },
-          });
-        } catch (e) {
-          throw new Error('database error');
-        }
+        const user = await User.findById(parent.id);
+        return await User.find({
+          _id: { $in: user.following },
+        });
       },
     },
     decks: {
@@ -115,16 +107,6 @@ const DeckType = new GraphQLObjectType({
         return Card.find({ deckId: parent.id });
       },
     },
-    // unseenCards: {
-    //   type: GraphQLInt,
-    //   async resolve(parent, args) {
-    //     const cards = await Card.find({
-    //       deckId: parent.id,
-    //       reviewNext: { $ne: null },
-    //     });
-    //     return cards.length;
-    //   },
-    // },
   }),
 });
 
@@ -176,9 +158,14 @@ const RootQuery = new GraphQLObjectType({
 
         const deck = await Deck.findById(args.id);
 
+        if (deck.publicId && !user) return deck;
+
         if (!deck.publicId && deck.userId !== user?.id)
           throw new Error('Forbidden');
-        return deck;
+
+        const copy = await Deck.findOne({ publicId: deck.id, userId: user.id });
+
+        return copy ? copy : deck;
       },
     },
     card: {
@@ -416,36 +403,39 @@ const Mutation = new GraphQLObjectType({
 
         const deck = await Deck.findById(args.id);
 
-        try {
-          const deckCopy = {
-            title: deck.title,
-            img: deck.img,
-            userId: user.id,
-            createdBy: deck.createdBy,
-            categoryId: deck.categoryId,
-            publicId: deck.id,
+        const alreadyExist = await Deck.findOne({
+          publicId: args.id,
+          userId: user.id,
+        });
+
+        if (alreadyExist) return alreadyExist;
+
+        const deckCopy = {
+          title: deck.title,
+          img: deck.img,
+          userId: user.id,
+          createdBy: deck.createdBy,
+          categoryId: deck.categoryId,
+          publicId: deck.id,
+        };
+
+        const deckCopyDB = await Deck(deckCopy).save();
+
+        const cards = await Card.find({ deckId: deck.id });
+
+        for (const card of cards) {
+          const cardCopy = {
+            publicId: card.id,
+            front: card.front,
+            back: card.back,
+            img: card.img,
+            audio: card.audio,
+            deckId: deckCopyDB.id,
           };
-
-          const deckCopyDB = await Deck(deckCopy).save();
-
-          const cards = await Card.find({ deckId: deck.id });
-
-          for (const card of cards) {
-            const cardCopy = {
-              publicId: card.id,
-              front: card.front,
-              back: card.back,
-              img: card.img,
-              audio: card.audio,
-              deckId: deckCopyDB.id,
-            };
-            Card(cardCopy).save();
-          }
-
-          return deckCopyDB;
-        } catch (err) {
-          throw new Error(err.message);
+          Card(cardCopy).save();
         }
+
+        return deckCopyDB;
       },
     },
     createCard: {
