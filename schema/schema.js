@@ -6,6 +6,7 @@ const Card = require('../models/card');
 const Deck = require('../models/deck');
 const User = require('../models/user');
 const Category = require('../models/category');
+const { DIFFICULTY, getNextReview } = require('../utils/study');
 
 const {
   GraphQLObjectType,
@@ -54,6 +55,24 @@ const UserType = new GraphQLObjectType({
         return Deck.find({ userId: parent.id, publicId: { $ne: null } });
       },
     },
+    mastered: {
+      type: GraphQLInt,
+      async resolve(parent, args, context) {
+        const decks = await Deck.find({ userId: parent.id });
+
+        let count = 0;
+
+        for (const deck of decks) {
+          const masteredCards = await Card.find({
+            deckId: deck.id,
+            mastered: true,
+          });
+          count += masteredCards ? masteredCards.length : 0;
+        }
+
+        return count;
+      },
+    },
   }),
 });
 
@@ -99,6 +118,14 @@ const DeckType = new GraphQLObjectType({
       type: UserType,
       resolve(parent, args) {
         return User.findById(parent.userId);
+      },
+    },
+    mastered: {
+      type: GraphQLInt,
+      async resolve(parent, args) {
+        const mastered = await Card.find({ deckId: parent.id, mastered: true });
+
+        return mastered.length;
       },
     },
     cards: {
@@ -684,6 +711,42 @@ const Mutation = new GraphQLObjectType({
           { publicId: card.id },
           { $set: { front: args.front, back: args.back } }
         );
+      },
+    },
+    studySession: {
+      type: GraphQLList(CardType),
+      args: {
+        cards: { type: GraphQLString },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        const cards = JSON.parse(args.cards);
+
+        for (const card of cards) {
+          const cardDB = await Card.findById(card.id);
+          const deck = await Deck.findOne({
+            _id: cardDB.deckId,
+            userId: user.id,
+          });
+
+          if (!deck) throw new Error('Not authorized to modify this deck');
+
+          if (cardDB) {
+            const nextReview = new Date(getNextReview(cardDB, card.rated));
+
+            if (nextReview) {
+              await Card.updateOne(
+                { _id: cardDB.id },
+                { nextReview: nextReview }
+              );
+            }
+          }
+        }
+
+        return cards;
       },
     },
   },

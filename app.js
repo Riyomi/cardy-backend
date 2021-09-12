@@ -4,7 +4,6 @@ const express = require('express');
 const { graphqlHTTP } = require('express-graphql');
 const schema = require('./schema/schema');
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const app = express();
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -16,8 +15,6 @@ mongoose.connect(
 mongoose.connection.once('open', () => {
   console.log('connected to database');
 });
-
-let refreshTokens = [];
 
 app.use(
   cors({
@@ -36,11 +33,6 @@ app.use('/graphql', (req, res) => {
 });
 
 app.use(express.json());
-
-app.delete('/logout', (req, res) => {
-  refreshTokens = refreshTokens.filter((token) => token !== req.body.token);
-  res.sendStatus(204);
-});
 
 app.listen(4000, () => {
   console.log('Listening on port 4000...');
