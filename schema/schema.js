@@ -714,7 +714,7 @@ const Mutation = new GraphQLObjectType({
       },
     },
     studySession: {
-      type: GraphQLList(CardType),
+      type: GraphQLInt,
       args: {
         cards: { type: GraphQLString },
       },
@@ -725,6 +725,8 @@ const Mutation = new GraphQLObjectType({
 
         const cards = JSON.parse(args.cards);
 
+        let experienceGained = 0;
+
         for (const card of cards) {
           const cardDB = await Card.findById(card.id);
           const deck = await Deck.findOne({
@@ -733,8 +735,6 @@ const Mutation = new GraphQLObjectType({
           });
 
           if (!deck) throw new Error('Not authorized to modify this deck');
-
-          let experienceGained = 0;
 
           if (cardDB) {
             const { nextReview, streak, step, mastered } = getNextReview(
@@ -756,18 +756,47 @@ const Mutation = new GraphQLObjectType({
               }
             );
           }
-
-          await User.updateOne(
-            { _id: user.id },
-            {
-              $inc: {
-                experience: experienceGained,
-              },
-            }
-          );
         }
 
-        return cards;
+        await User.updateOne(
+          { _id: user.id },
+          {
+            $inc: {
+              experience: experienceGained,
+            },
+          }
+        );
+
+        return experienceGained;
+      },
+    },
+    resetDeck: {
+      type: DeckType,
+      args: {
+        id: { type: GraphQLID },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        const deck = await Deck.findOne({ _id: args.id, userId: user.id });
+
+        if (!deck) throw new Error('Deck not found');
+
+        await Card.updateMany(
+          { deckId: deck.id },
+          {
+            $set: {
+              step: 2,
+              streak: 0,
+              mastered: false,
+              nextReview: null,
+            },
+          }
+        );
+
+        return deck;
       },
     },
   },
