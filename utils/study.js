@@ -7,30 +7,38 @@ const DIFFICULTY = {
 
 const getNextReview = (card, answered) => {
   const HOUR_IN_MS = 60 * 60 * 1000;
+  const now = Date.now();
+  const { step, streak, mastered } = card;
 
-  if (card.nextReview) {
-    const { nextReview, step, streak } = card;
-    let newStep = step;
-
-    if (answered === DIFFICULTY.EASY) {
-      newStep = step + 0.5;
-    } else if (answered === DIFFICULTY.NORMAL) {
-      newStep = step + 0.3;
-    } else if (answered === DIFFICULTY.HARD) {
-      newStep = step + 0.1;
-    } else if (answered === DIFFICULTY.DIDNT_KNOW) {
-      if (step - 0.2 >= 0.1) return nextReview + (step - 0.2) * 3 * HOUR_IN_MS;
-      else return nextReview + 0.1 * 3 * HOUR_IN_MS;
-    }
-    return nextReview + newStep * 3 * 2 ** streak * HOUR_IN_MS;
-  } else {
-    if (answered === DIFFICULTY.EASY) {
-      return Date.now() + 12 * HOUR_IN_MS;
-    } else if (answered === DIFFICULTY.NORMAL) {
-      return Date.now() + 6 * HOUR_IN_MS;
-    } else {
-      return Date.now() + 3 * HOUR_IN_MS;
-    }
+  switch (answered) {
+    case DIFFICULTY.EASY:
+      return {
+        mastered: step + 0.5 >= 5 || mastered ? true : false,
+        nextReview: now + Math.floor(6 * HOUR_IN_MS * step * 2 ** streak),
+        step: step + 0.5,
+        streak: streak + 1,
+      };
+    case DIFFICULTY.NORMAL:
+      return {
+        mastered: step + 0.3 >= 5 || mastered ? true : false,
+        nextReview: now + Math.floor(3 * HOUR_IN_MS * step * 2 ** streak),
+        step: step + 0.3,
+        streak: streak + 1,
+      };
+    case DIFFICULTY.HARD:
+      return {
+        mastered: step + 0.1 >= 5 || mastered ? true : false,
+        nextReview: now + Math.floor(1.5 * HOUR_IN_MS * step * 2 ** streak),
+        step: step + 0.1,
+        streak: streak + 1,
+      };
+    case DIFFICULTY.DIDNT_KNOW:
+      return {
+        mastered: mastered,
+        nextReview: now + Math.floor(0.5 * HOUR_IN_MS * step),
+        step: step - 0.2 >= 0 ? step - 0.2 : 0,
+        streak: 0,
+      };
   }
 };
 

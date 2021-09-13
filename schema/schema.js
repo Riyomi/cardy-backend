@@ -734,16 +734,37 @@ const Mutation = new GraphQLObjectType({
 
           if (!deck) throw new Error('Not authorized to modify this deck');
 
-          if (cardDB) {
-            const nextReview = new Date(getNextReview(cardDB, card.rated));
+          let experienceGained = 0;
 
-            if (nextReview) {
-              await Card.updateOne(
-                { _id: cardDB.id },
-                { nextReview: nextReview }
-              );
-            }
+          if (cardDB) {
+            const { nextReview, streak, step, mastered } = getNextReview(
+              cardDB,
+              card.rated
+            );
+
+            experienceGained += mastered ? streak * 10 : streak * 5;
+
+            await Card.updateOne(
+              { _id: cardDB.id },
+              {
+                $set: {
+                  nextReview: new Date(nextReview),
+                  streak: streak,
+                  step: step,
+                  mastered: mastered,
+                },
+              }
+            );
           }
+
+          await User.updateOne(
+            { _id: user.id },
+            {
+              $inc: {
+                experience: experienceGained,
+              },
+            }
+          );
         }
 
         return cards;
