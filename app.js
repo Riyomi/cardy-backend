@@ -19,6 +19,7 @@ mongoose.connection.once('open', () => {
 app.use(
   cors({
     origin: 'https://alpha-cardy.netlify.app',
+    credentials: true,
   })
 );
 
