@@ -228,36 +228,55 @@ const Mutation = new GraphQLObjectType({
   name: 'Mutation',
   fields: {
     createUser: {
-      type: UserType,
+      type: SessionType,
       args: {
         email: { type: new GraphQLNonNull(GraphQLString) },
         name: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
         confirmPassword: { type: new GraphQLNonNull(GraphQLString) },
       },
-      async resolve(parent, args) {
-        if (!args.email) throw new Error('Email is required');
-        if (!args.name) throw new Error('Name is required');
-        if (!args.password) throw new Error('Password is required');
+      async resolve(parent, args, context) {
+        const { name, email, password, confirmPassword } = args;
 
-        if (args.password !== args.confirmPassword)
+        if (!email) throw new Error('Email is required');
+        if (!name) throw new Error('Name is required');
+        if (!password) throw new Error('Password is required');
+
+        if (password !== confirmPassword)
           throw new Error('Passwords do not match');
 
-        if (args.name.length > 20) {
+        if (name.length > 20) {
           throw new Error('The name is too long. Max 20 characters allowed');
         }
 
         try {
-          const hashedPassword = await bcrypt.hash(args.password, 10);
+          const hashedPassword = await bcrypt.hash(password, 10);
 
           const user = {
-            email: args.email,
-            name: args.name,
+            email: email,
+            name: name,
             password: hashedPassword,
           };
-          return User(user).save();
+          const userDB = await User(user).save();
+
+          const authenticatedUser = { id: userDB.id, email: user.email };
+          const accessToken = generateAccessToken(authenticatedUser);
+          const refreshToken = jwt.sign(
+            authenticatedUser,
+            process.env.REFRESH_TOKEN_SECRET
+          );
+          const expires = new Date(Date.now() + 900000).toString();
+          // const expires = new Date(Date.now() + 15000).toString(); // for testing only
+
+          context.res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            sameSite: 'none',
+            secure: true,
+          });
+
+          return { user: userDB, accessToken, expires };
         } catch (e) {
-          throw new Error('Server error');
+          throw new Error(e.message);
         }
       },
     },
@@ -303,50 +322,47 @@ const Mutation = new GraphQLObjectType({
       },
     },
     followUser: {
-      type: UserType,
+      type: GraphQLString,
       args: {
-        userToBeFollowed: { type: new GraphQLNonNull(GraphQLID) },
+        userId: { type: new GraphQLNonNull(GraphQLID) },
       },
       async resolve(parent, args, context) {
         const token = context.token;
         const user = authenticateToken(token);
+        const { userId } = args;
 
         if (!user) throw new Error('Forbidden');
 
-        try {
-          await User.findByIdAndUpdate(args.userToBeFollowed, {
-            $push: { followers: user.id },
-          });
+        const userDB = await User.findById(user.id);
 
-          return await User.findByIdAndUpdate(user.id, {
-            $push: { following: args.userToBeFollowed },
-          });
-        } catch (e) {
-          throw new Error('Follower or following not found');
-        }
-      },
-    },
-    unfollowUser: {
-      type: UserType,
-      args: {
-        userToBeUnfollowed: { type: new GraphQLNonNull(GraphQLID) },
-      },
-      async resolve(parent, args, context) {
-        const token = context.token;
-        const user = authenticateToken(token);
+        if (userDB.following.includes(userId)) {
+          try {
+            await User.findByIdAndUpdate(user.id, {
+              $pull: { following: userId },
+            });
 
-        if (!user) throw new Error('Forbidden');
+            await User.findByIdAndUpdate(userId, {
+              $pull: { followers: user.id },
+            });
 
-        try {
-          await User.findByIdAndUpdate(user.id, {
-            $pull: { following: args.userToBeUnfollowed },
-          });
+            return 'Unfollowed';
+          } catch (e) {
+            throw new Error('Follower or following not found');
+          }
+        } else {
+          try {
+            await User.findByIdAndUpdate(userId, {
+              $push: { followers: user.id },
+            });
 
-          return await User.findByIdAndUpdate(args.userToBeUnfollowed, {
-            $pull: { followers: user.id },
-          });
-        } catch (e) {
-          throw new Error('Follower or following not found');
+            await User.findByIdAndUpdate(user.id, {
+              $push: { following: userId },
+            });
+
+            return 'Followed';
+          } catch (e) {
+            throw new Error('Follower or following not found');
+          }
         }
       },
     },
