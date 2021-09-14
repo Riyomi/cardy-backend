@@ -6,7 +6,7 @@ const Card = require('../models/card');
 const Deck = require('../models/deck');
 const User = require('../models/user');
 const Category = require('../models/category');
-const { DIFFICULTY, getNextReview } = require('../utils/study');
+const { getNextReview } = require('../utils/study');
 
 const {
   GraphQLObjectType,
@@ -403,8 +403,6 @@ const Mutation = new GraphQLObjectType({
       type: GraphQLString,
       async resolve(parent, args, context) {
         context.res.clearCookie('refreshToken');
-        context.res.clearCookie('accessToken');
-
         return 'Logged out';
       },
     },
@@ -495,10 +493,12 @@ const Mutation = new GraphQLObjectType({
         const user = authenticateToken(token);
         if (!user) throw new Error('Forbidden');
 
-        if (args.front.length > 255 || args.back.length > 255)
+        const { deckId, front, back } = args;
+
+        if (front.length > 255 || back.length > 255)
           throw new Error('Fields are too long, max 255 characters allowed.');
 
-        const deck = await Deck.findById(args.deckId);
+        const deck = await Deck.findById(deckId);
         if (!deck) throw new Error('Deck not found');
 
         if (deck.publicId && deck.publicId !== deck.id)
@@ -506,11 +506,11 @@ const Mutation = new GraphQLObjectType({
 
         const card = {
           publicId: null,
-          front: args.front,
-          back: args.back,
+          front,
+          back,
           img: args?.img,
           audio: args?.audio,
-          deckId: args.deckId,
+          deckId,
         };
 
         const originalCard = await Card(card).save();
@@ -551,8 +551,10 @@ const Mutation = new GraphQLObjectType({
         const card = await Card.findById(args.id);
         if (!card) throw new Error('Card not found');
 
-        const deck = await Deck.findById(card.deckId);
-        if (deck.publicId && deck.publicId !== deck.id)
+        const deck = await Deck.findOne({ _id: card.deckId, userId: user.id });
+        if (!deck) throw new Error('Deck not found');
+
+        if (deck.publicId !== deck.id)
           throw new Error('Not authorized to modify deck');
 
         await Card.deleteMany({ publicId: card.id });
@@ -564,7 +566,7 @@ const Mutation = new GraphQLObjectType({
       type: DeckType,
       args: {
         id: { type: new GraphQLNonNull(GraphQLID) },
-        title: { type: GraphQLString },
+        title: { type: new GraphQLNonNull(GraphQLString) },
         categoryId: { type: new GraphQLNonNull(GraphQLID) },
       },
       async resolve(parent, args, context) {
@@ -572,38 +574,21 @@ const Mutation = new GraphQLObjectType({
         const user = authenticateToken(token);
         if (!user) throw new Error('Forbidden');
 
-        if (!args.title) throw new Error('The deck must have a title');
+        const { id, title, categoryId } = args;
 
-        const deck = await Deck.findById(args.id);
+        const deck = await Deck.findOne({ _id: id, userId: user.id });
         if (!deck) throw new Error('Deck not found');
 
-        const category = await Category.findById(args.categoryId);
+        const category = await Category.findById(categoryId);
         if (!category) throw new Error('Category not found');
 
-        if (
-          deck.publicId &&
-          deck.id === deck.publicId &&
-          deck.userId === user.id
-        ) {
+        if (deck.id === deck.publicId) {
           await Deck.updateMany(
             { publicId: deck.publicId },
-            {
-              $set: {
-                title: args.title,
-                categoryId: args.categoryId,
-              },
-            }
+            { $set: { title, categoryId } }
           );
-        } else if (!deck.publicId && deck.userId === user.id) {
-          await Deck.updateOne(
-            { _id: args.id },
-            {
-              $set: {
-                title: args.title,
-                categoryId: args.categoryId,
-              },
-            }
-          );
+        } else if (!deck.publicId) {
+          await Deck.updateOne({ _id: id }, { $set: { title, categoryId } });
         } else {
           throw new Error('Not authorized to modify deck');
         }
@@ -619,20 +604,14 @@ const Mutation = new GraphQLObjectType({
         const user = authenticateToken(token);
         if (!user) throw new Error('Forbidden');
 
-        const deck = await Deck.findById(args.id);
+        const { id } = args;
 
-        if (
-          deck.publicId &&
-          deck.id === deck.publicId &&
-          deck.userId === user.id
-        ) {
+        const deck = await Deck.findOne({ _id: id, userId: user.id });
+
+        if (deck.id === deck.publicId) {
           await Card.updateMany(
             { deckId: deck.publicId },
-            {
-              $set: {
-                publicId: null,
-              },
-            }
+            { $set: { publicId: null } }
           );
 
           const decksToUpdate = await Deck.find({ publicId: deck.publicId });
@@ -640,31 +619,16 @@ const Mutation = new GraphQLObjectType({
           for (const deck of decksToUpdate) {
             await Card.updateMany(
               { deckId: deck.id },
-              {
-                $set: {
-                  publicId: null,
-                },
-              }
+              { $set: { publicId: null } }
             );
           }
 
           await Deck.updateMany(
             { publicId: deck.publicId },
-            {
-              $set: {
-                publicId: null,
-              },
-            }
+            { $set: { publicId: null } }
           );
-        } else if (!deck.publicId && deck.userId === user.id) {
-          await Deck.updateOne(
-            { _id: args.id },
-            {
-              $set: {
-                publicId: args.id,
-              },
-            }
-          );
+        } else if (!deck.publicId) {
+          await Deck.updateOne({ _id: id }, { $set: { publicId: id } });
 
           const cardsToUpdate = await Card.find({ deckId: deck.id });
 
@@ -690,10 +654,8 @@ const Mutation = new GraphQLObjectType({
 
         if (!user) throw new Error('Forbidden');
 
-        const accessToken = generateAccessToken({
-          id: user.id,
-          email: user.email,
-        });
+        const { id, email } = user;
+        const accessToken = generateAccessToken({ id, email });
 
         // const expires = new Date(Date.now() + 15000).toString(); // for testing only
         const expires = new Date(Date.now() + 900000).toString();
@@ -713,20 +675,19 @@ const Mutation = new GraphQLObjectType({
         const user = authenticateToken(token);
         if (!user) throw new Error('Forbidden');
 
-        if (args.front.length > 255 || args.back.length > 255)
+        const { id, front, back } = args;
+
+        if (front.length > 255 || back.length > 255)
           throw new Error('Fields are too long, max 255 characters allowed.');
 
-        const card = await Card.findById(args.id);
+        const card = await Card.findById(id);
         if (!card) throw new Error('Card not found');
 
-        const deck = await Deck.findById(card.deckId);
-        if (deck.publicId && deck.publicId !== deck.id)
+        const deck = await Deck.findOne({ _id: card.deckId, userId: user.id });
+        if (deck.publicId !== deck.id)
           throw new Error('Not authorized to modify deck');
 
-        await Card.updateMany(
-          { publicId: card.id },
-          { $set: { front: args.front, back: args.back } }
-        );
+        await Card.updateMany({ publicId: card.id }, { $set: { front, back } });
       },
     },
     studySession: {
@@ -765,9 +726,9 @@ const Mutation = new GraphQLObjectType({
               {
                 $set: {
                   nextReview: new Date(nextReview),
-                  streak: streak,
-                  step: step,
-                  mastered: mastered,
+                  streak,
+                  step,
+                  mastered,
                 },
               }
             );
@@ -776,11 +737,7 @@ const Mutation = new GraphQLObjectType({
 
         await User.updateOne(
           { _id: user.id },
-          {
-            $inc: {
-              experience: experienceGained,
-            },
-          }
+          { $inc: { experience: experienceGained } }
         );
 
         return experienceGained;
