@@ -18,7 +18,9 @@ mongoose.connection.once('open', () => {
 
 app.use(
   cors({
-    origin: 'https://alpha-cardy.netlify.app',
+    origin: process.env.DEVELOPER
+      ? 'http://localhost:3000'
+      : 'https://alpha-cardy.netlify.app',
     credentials: true,
   })
 );
