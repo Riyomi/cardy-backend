@@ -111,7 +111,7 @@ const DeckType = new GraphQLObjectType({
     createdBy: {
       type: UserType,
       resolve(parent, args) {
-        return User.findById(parent.userId);
+        return User.findById(parent.createdBy);
       },
     },
     user: {
@@ -248,6 +248,10 @@ const Mutation = new GraphQLObjectType({
         if (name.length > 20) {
           throw new Error('The name is too long. Max 20 characters allowed');
         }
+
+        const alreadyExists = await User.findOne({ email: email });
+
+        if (alreadyExists) throw new Error('This email is already taken');
 
         try {
           const hashedPassword = await bcrypt.hash(password, 10);
@@ -640,6 +644,36 @@ const Mutation = new GraphQLObjectType({
           }
         } else {
           throw new Error('Not authorized to modify deck');
+        }
+      },
+    },
+    optOut: {
+      type: GraphQLString,
+      args: {
+        id: { type: new GraphQLNonNull(GraphQLID) },
+      },
+      async resolve(parent, args, context) {
+        const token = context.token;
+        const user = authenticateToken(token);
+        if (!user) throw new Error('Forbidden');
+
+        const { id } = args;
+
+        const deck = await Deck.findOne({ _id: id, userId: user.id });
+
+        if (!deck) throw new Error('Deck not found');
+
+        if (deck.publicId !== deck.id) {
+          await Deck.findByIdAndUpdate(id, { $set: { publicId: null } });
+          await Card.updateMany(
+            { deckId: id },
+            {
+              $set: {
+                publicId: null,
+              },
+            }
+          );
+          return 'Successfully opted out of synching';
         }
       },
     },

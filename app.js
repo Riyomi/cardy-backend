@@ -18,7 +18,7 @@ mongoose.connection.once('open', () => {
 
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: 'https://alpha-cardy.netlify.app',
   })
 );
 
@@ -34,7 +34,7 @@ app.use('/graphql', (req, res) => {
 
 app.use(express.json());
 
-app.listen(4000, () => {
+app.listen(process.env.PORT || 4000, () => {
   console.log('Listening on port 4000...');
 });
 
