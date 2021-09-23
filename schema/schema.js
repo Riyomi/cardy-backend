@@ -50,7 +50,7 @@ const UserType = new GraphQLObjectType({
         const { token } = context;
         const user = authenticateToken(token);
 
-        if (user) return Deck.find({ userId: parent.id });
+        if (user.id === parent.id) return Deck.find({ userId: parent.id });
 
         return Deck.find({ userId: parent.id, publicId: { $ne: null } });
       },
