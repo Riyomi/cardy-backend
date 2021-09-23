@@ -270,7 +270,6 @@ const Mutation = new GraphQLObjectType({
             process.env.REFRESH_TOKEN_SECRET
           );
           const expires = new Date(Date.now() + 900000).toString();
-          // const expires = new Date(Date.now() + 15000).toString(); // for testing only
 
           context.res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
@@ -305,7 +304,6 @@ const Mutation = new GraphQLObjectType({
                 process.env.REFRESH_TOKEN_SECRET
               );
               const expires = new Date(Date.now() + 900000).toString();
-              // const expires = new Date(Date.now() + 15000).toString(); // for testing only
 
               context.res.cookie('refreshToken', refreshToken, {
                 httpOnly: true,
@@ -714,11 +712,13 @@ const Mutation = new GraphQLObjectType({
         if (front.length > 255 || back.length > 255)
           throw new Error('Fields are too long, max 255 characters allowed.');
 
-        const card = await Card.findById(id);
+        const card = await Card.findByIdAndUpdate(id, {
+          $set: { front, back },
+        });
         if (!card) throw new Error('Card not found');
 
         const deck = await Deck.findOne({ _id: card.deckId, userId: user.id });
-        if (deck.publicId !== deck.id)
+        if (deck.publicId && deck.publicId !== deck.id)
           throw new Error('Not authorized to modify deck');
 
         await Card.updateMany({ publicId: card.id }, { $set: { front, back } });

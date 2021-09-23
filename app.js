@@ -16,16 +16,16 @@ mongoose.connection.once('open', () => {
   console.log('connected to database');
 });
 
+app.use(cookieParser());
+
 app.use(
   cors({
     origin: process.env.DEVELOPER
-      ? 'http://localhost:3000'
+      ? ['http://localhost:3000', 'http://192.168.1.108:3000']
       : 'https://alpha-cardy.netlify.app',
     credentials: true,
   })
 );
-
-app.use(cookieParser());
 
 app.use('/graphql', (req, res) => {
   return graphqlHTTP({
