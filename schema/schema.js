@@ -216,9 +216,14 @@ const RootQuery = new GraphQLObjectType({
     },
     decks: {
       type: GraphQLList(DeckType),
+      args: {
+        limit: { type: GraphQLInt },
+      },
       async resolve(parent, args) {
         const decks = await Deck.find({ publicId: { $ne: null } });
-        return decks.filter((deck) => deck.id === deck.publicId);
+        return decks
+          .filter((deck) => deck.id === deck.publicId)
+          .slice(0, args.limit ? args.limit + 1 : 7);
       },
     },
   },
